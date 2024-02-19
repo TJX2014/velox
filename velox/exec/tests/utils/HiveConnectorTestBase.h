@@ -73,6 +73,13 @@ class HiveConnectorTestBase : public OperatorTestBase {
       uint64_t start = 0,
       uint64_t length = std::numeric_limits<uint64_t>::max());
 
+  static std::shared_ptr<connector::ConnectorSplit> makeHiveConnectorSplit(
+      const std::string& filePath,
+      int64_t fileSize,
+      int64_t fileModifiedTime,
+      uint64_t start,
+      uint64_t length);
+
   /// Split file at path 'filePath' into 'splitCount' splits. If not local file,
   /// file size can be given as 'externalSize'.
   static std::vector<std::shared_ptr<connector::hive::HiveConnectorSplit>>
@@ -202,6 +209,13 @@ class HiveConnectorSplitBuilder {
     return *this;
   }
 
+  HiveConnectorSplitBuilder& infoColumn(
+      const std::string& name,
+      const std::string& value) {
+    infoColumns_.emplace(std::move(name), std::move(value));
+    return *this;
+  }
+
   HiveConnectorSplitBuilder& partitionKey(
       std::string name,
       std::optional<std::string> value) {
@@ -211,6 +225,24 @@ class HiveConnectorSplitBuilder {
 
   HiveConnectorSplitBuilder& tableBucketNumber(int32_t bucket) {
     tableBucketNumber_ = bucket;
+    return *this;
+  }
+
+  HiveConnectorSplitBuilder& customSplitInfo(
+      const std::unordered_map<std::string, std::string>& customSplitInfo) {
+    customSplitInfo_ = customSplitInfo;
+    return *this;
+  }
+
+  HiveConnectorSplitBuilder& extraFileInfo(
+      const std::shared_ptr<std::string>& extraFileInfo) {
+    extraFileInfo_ = extraFileInfo;
+    return *this;
+  }
+
+  HiveConnectorSplitBuilder& serdeParameters(
+      const std::unordered_map<std::string, std::string>& serdeParameters) {
+    serdeParameters_ = serdeParameters;
     return *this;
   }
 
@@ -227,7 +259,11 @@ class HiveConnectorSplitBuilder {
         start_,
         length_,
         partitionKeys_,
-        tableBucketNumber_);
+        tableBucketNumber_,
+        customSplitInfo_,
+        extraFileInfo_,
+        serdeParameters_,
+        infoColumns_);
   }
 
  private:
@@ -237,6 +273,10 @@ class HiveConnectorSplitBuilder {
   uint64_t length_{std::numeric_limits<uint64_t>::max()};
   std::unordered_map<std::string, std::optional<std::string>> partitionKeys_;
   std::optional<int32_t> tableBucketNumber_;
+  std::unordered_map<std::string, std::string> customSplitInfo_ = {};
+  std::shared_ptr<std::string> extraFileInfo_ = {};
+  std::unordered_map<std::string, std::string> serdeParameters_ = {};
+  std::unordered_map<std::string, std::string> infoColumns_ = {};
   std::string connectorId_ = kHiveConnectorId;
 };
 

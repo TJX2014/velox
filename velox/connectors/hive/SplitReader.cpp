@@ -173,6 +173,30 @@ void SplitReader::prepareSplit(
   baseRowReader_ = baseReader_->createRowReader(baseRowReaderOpts_);
 }
 
+namespace {
+template <TypeKind ToKind>
+velox::variant convertFromString(
+    const std::string& value,
+    const TypePtr& toType) {
+  if constexpr (ToKind == TypeKind::VARCHAR) {
+    return velox::variant(value);
+  }
+  if constexpr (ToKind == TypeKind::VARBINARY) {
+    return velox::variant::binary((value));
+  }
+  if (toType->isDate()) {
+    return velox::variant(
+        util::castFromDateString(StringView(value), true /*isIso8601*/));
+  }
+  auto result = velox::util::Converter<ToKind>::cast(value);
+  if constexpr (ToKind == TypeKind::TIMESTAMP) {
+    result.toGMT(Timestamp::defaultTimezone());
+  }
+  return velox::variant(result);
+}
+
+} // namespace
+
 std::vector<TypePtr> SplitReader::adaptColumns(
     const RowTypePtr& fileType,
     const std::shared_ptr<const velox::RowType>& tableSchema) {
@@ -184,9 +208,10 @@ std::vector<TypePtr> SplitReader::adaptColumns(
     auto* childSpec = childrenSpecs[i].get();
     const std::string& fieldName = childSpec->fieldName();
 
-    auto iter = hiveSplit_->partitionKeys.find(fieldName);
-    if (iter != hiveSplit_->partitionKeys.end()) {
-      setPartitionValue(childSpec, fieldName, iter->second);
+    auto partitionKey = hiveSplit_->partitionKeys.find(fieldName);
+    auto infoColumn = hiveSplit_->infoColumns.find(fieldName);
+    if (partitionKey != hiveSplit_->partitionKeys.end()) {
+      setPartitionValue(childSpec, fieldName, partitionKey->second);
     } else if (fieldName == kPath) {
       setConstantValue(
           childSpec, VARCHAR(), velox::variant(hiveSplit_->filePath));
@@ -197,6 +222,15 @@ std::vector<TypePtr> SplitReader::adaptColumns(
             INTEGER(),
             velox::variant(hiveSplit_->tableBucketNumber.value()));
       }
+    } else if (infoColumn != hiveSplit_->infoColumns.end()) {
+      auto infoColumnType =
+          readerOutputType_->childAt(readerOutputType_->getChildIdx(fieldName));
+      auto value = VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(
+          convertFromString,
+          infoColumnType->kind(),
+          infoColumn->second,
+          infoColumnType);
+      setConstantValue(childSpec, infoColumnType, value);
     } else {
       auto fileTypeIdx = fileType->getChildIdxIfExists(fieldName);
       if (!fileTypeIdx.has_value()) {
